@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Shadow DOM Test for Archive Scraper</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .test-section {
+            border: 2px solid #ccc;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .BRwordElement {
+            display: inline-block;
+            margin: 2px;
+            padding: 2px 4px;
+            background: #f0f0f0;
+            border-radius: 3px;
+        }
+        #test-results {
+            background: #e8f4f8;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>Shadow DOM Test Page</h1>
+    <p>This page simulates the Internet Archive book reader structure with Shadow DOM for testing the scraper.</p>
+    
+    <div class="test-section">
+        <h2>Test 1: Simple Shadow DOM</h2>
+        <div id="simple-shadow-host"></div>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 2: Nested Shadow DOM (simulating ia-book-theater)</h2>
+        <ia-book-theater id="book-theater"></ia-book-theater>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test 3: Regular DOM (no shadow)</h2>
+        <div class="BRwordElement">Regular</div>
+        <div class="BRwordElement">DOM</div>
+        <div class="BRwordElement">Text</div>
+    </div>
+    
+    <button onclick="runTests()">Run Extraction Tests</button>
+    
+    <div id="test-results"></div>
+
+    <script>
+        // Create simple shadow DOM
+        const simpleHost = document.getElementById('simple-shadow-host');
+        const simpleShadow = simpleHost.attachShadow({mode: 'open'});
+        simpleShadow.innerHTML = `
+            <div class="BRwordElement">Shadow</div>
+            <div class="BRwordElement">DOM</div>
+            <div class="BRwordElement">Text</div>
+        `;
+        
+        // Create nested shadow DOM structure (simulating ia-book-theater)
+        class BookTheater extends HTMLElement {
+            constructor() {
+                super();
+                const shadow = this.attachShadow({mode: 'open'});
+                
+                // Create nested structure
+                shadow.innerHTML = `
+                    <div id="book-container">
+                        <div id="page-container">
+                            <div class="BRwordElement">This</div>
+                            <div class="BRwordElement">is</div>
+                            <div class="BRwordElement">nested</div>
+                            <div class="BRwordElement">shadow</div>
+                            <div class="BRwordElement">content</div>
+                        </div>
+                        <div id="controls">
+                            <button class="BRicon next" title="Next page">Next</button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        customElements.define('ia-book-theater', BookTheater);
+        
+        // Test extraction function (same as in scraper.py)
+        function extractTextFromShadowDOM(root) {
+            let allText = [];
+            
+            function traverse(element) {
+                if (element.shadowRoot) {
+                    traverse(element.shadowRoot);
+                }
+                
+                if (element instanceof DocumentFragment || element instanceof ShadowRoot) {
+                    const wordElements = element.querySelectorAll('.BRwordElement');
+                    wordElements.forEach(wordEl => {
+                        const text = wordEl.textContent || wordEl.innerText;
+                        if (text && text.trim()) {
+                            allText.push(text.trim());
+                        }
+                    });
+                    
+                    const children = element.querySelectorAll('*');
+                    children.forEach(child => traverse(child));
+                }
+                
+                if (element instanceof Element) {
+                    if (element.classList && element.classList.contains('BRwordElement')) {
+                        const text = element.textContent || element.innerText;
+                        if (text && text.trim()) {
+                            allText.push(text.trim());
+                        }
+                    }
+                    
+                    if (element.shadowRoot) {
+                        traverse(element.shadowRoot);
+                    }
+                    
+                    Array.from(element.children).forEach(child => traverse(child));
+                }
+            }
+            
+            traverse(root);
+            return allText;
+        }
+        
+        // Test next button finder
+        function findNextButton(root) {
+            function findButton(element) {
+                if (element.shadowRoot) {
+                    const button = findButton(element.shadowRoot);
+                    if (button) return button;
+                }
+                
+                if (element instanceof DocumentFragment || element instanceof ShadowRoot) {
+                    const selectors = [
+                        'button.BRicon.next',
+                        'button[title*="next" i]',
+                        'button[aria-label*="next" i]'
+                    ];
+                    
+                    for (let selector of selectors) {
+                        try {
+                            const button = element.querySelector(selector);
+                            if (button && !button.disabled) {
+                                return button;
+                            }
+                        } catch (e) {}
+                    }
+                    
+                    const children = element.querySelectorAll('*');
+                    for (let child of children) {
+                        const button = findButton(child);
+                        if (button) return button;
+                    }
+                }
+                
+                return null;
+            }
+            
+            return findButton(root);
+        }
+        
+        // Run tests
+        function runTests() {
+            const results = document.getElementById('test-results');
+            results.innerHTML = '<h2>Test Results</h2>';
+            
+            // Test 1: Extract from entire document
+            const allText = extractTextFromShadowDOM(document.body);
+            results.innerHTML += `<p><strong>Total text elements extracted:</strong> ${allText.length}</p>`;
+            results.innerHTML += `<p><strong>Extracted text:</strong> ${allText.join(', ')}</p>`;
+            
+            // Test 2: Extract from ia-book-theater specifically
+            const bookTheater = document.querySelector('ia-book-theater');
+            if (bookTheater) {
+                const theaterText = extractTextFromShadowDOM(bookTheater);
+                results.innerHTML += `<p class="success">✓ ia-book-theater found</p>`;
+                results.innerHTML += `<p><strong>Theater text:</strong> ${theaterText.join(', ')}</p>`;
+            } else {
+                results.innerHTML += `<p class="error">✗ ia-book-theater not found</p>`;
+            }
+            
+            // Test 3: Find next button
+            const nextButton = findNextButton(bookTheater);
+            if (nextButton) {
+                results.innerHTML += `<p class="success">✓ Next button found in shadow DOM</p>`;
+                results.innerHTML += `<p><strong>Button title:</strong> ${nextButton.getAttribute('title')}</p>`;
+            } else {
+                results.innerHTML += `<p class="error">✗ Next button not found</p>`;
+            }
+            
+            // Verify expected results
+            const expectedWords = [
+                'Shadow', 'DOM', 'Text',  // Simple shadow
+                'This', 'is', 'nested', 'shadow', 'content',  // Book theater
+                'Regular', 'DOM', 'Text'  // Regular DOM
+            ];
+            
+            const success = allText.length >= 11;  // Should have at least 11 words
+            
+            if (success) {
+                results.innerHTML += `<p class="success"><strong>✓ All tests passed!</strong></p>`;
+            } else {
+                results.innerHTML += `<p class="error"><strong>✗ Tests failed. Expected at least 11 elements, got ${allText.length}</strong></p>`;
+            }
+        }
+        
+        // Auto-run tests on load
+        window.onload = () => {
+            setTimeout(runTests, 500);
+        };
+    </script>
+</body>
+</html>
